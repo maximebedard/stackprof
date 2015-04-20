@@ -53,10 +53,23 @@ class StackProf::MiddlewareTest < Test::Unit::TestCase
     assert enabled
     assert_equal 'foo', mode
 
-    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval})
+    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: false})
     StackProf.expects(:stop)
 
     middleware.call(nil)
+    assert proc_called
+  end
+
+  def test_raw_should_start_with_raw
+    proc_called = false
+
+    middleware = StackProf::Middleware.new(proc { |env| proc_called = true }, enabled: [true, 'foo'], raw: true)
+
+    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: true})
+    StackProf.expects(:stop)
+
+    middleware.call(nil)
+
     assert proc_called
   end
 
