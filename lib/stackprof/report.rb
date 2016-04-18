@@ -12,16 +12,34 @@ module StackProf
       Hash[ *@data[:frames].sort_by{ |iseq, stats| -stats[sort_by_total ? :total_samples : :samples] }.flatten(1) ]
     end
 
+    # normalized frames is used when we want to combine multiple
+    # output files, (via +() below). In order to simplify combination
+    # of files that are from "different" source revisions, the frames
+    # are normalised by converting them to an MD5 using the "name, file, line"
+    # once frames are converted, every edge that references the original
+    # needs to adjusted also.
     def normalized_frames
       id2hash = {}
       @data[:frames].each do |frame, info|
-        id2hash[frame.to_s] = info[:hash] = Digest::MD5.hexdigest("#{info[:name]}#{info[:file]}#{info[:line]}")
+        # id2 hash contains the original frames converted into a MD5
+        # based on the name, file, line of the original frame
+        # flamegraph likes the frames to be numbers, so md5.to_i(16)
+        id2hash[frame.to_s] = info[:hash] = Digest::MD5.hexdigest("#{info[:name]}#{info[:file]}#{info[:line]}").to_i(16)
       end
-      @data[:frames].inject(Hash.new) do |hash, (frame, info)|
+      # Convert all existing raw frames to use the new mapping via id2hash
+      # the array of raw frames contains a sequence of frame slices. Each
+      # frame slice is preceded by a count of the number of subsequent frames
+      # in the slice. Since the counts need not be normalized and we can
+      # identify frames by looking for a mapping in id2hash, add the
+      # normalized frame value when it is available, and just copy the
+      # existing value otherwise
+      raw_frames = @data[:raw].map {|v| id2hash[v.to_s] || v } if @data[:raw]
+      # return both the normalized frames and the normalized raw frames
+      return @data[:frames].inject(Hash.new) do |hash, (frame, info)|
         info = hash[id2hash[frame.to_s]] = info.dup
         info[:edges] = info[:edges].inject(Hash.new){ |edges, (edge, weight)| edges[id2hash[edge.to_s]] = weight; edges } if info[:edges]
         hash
-      end
+      end, raw_frames || []
     end
 
     def version
@@ -290,7 +308,9 @@ module StackProf
       raise ArgumentError, "cannot combine #{modeline} with #{other.modeline}" unless modeline == other.modeline
       raise ArgumentError, "cannot combine v#{version} with v#{other.version}" unless version == other.version
 
-      f1, f2 = normalized_frames, other.normalized_frames
+      # collect the normalized and the normalized raw frames
+      f1, raw_frames1 = normalized_frames
+      f2, raw_frames2 = other.normalized_frames
       frames = (f1.keys + f2.keys).uniq.inject(Hash.new) do |hash, id|
         if f1[id].nil?
           hash[id] = f2[id]
@@ -318,6 +338,8 @@ module StackProf
       end
 
       d1, d2 = data, other.data
+      # ensure that the new data contains the normalized frames
+      # and the normalized raw frames also
       data = {
         version: version,
         mode: d1[:mode],
@@ -325,7 +347,8 @@ module StackProf
         samples: d1[:samples] + d2[:samples],
         gc_samples: d1[:gc_samples] + d2[:gc_samples],
         missed_samples: d1[:missed_samples] + d2[:missed_samples],
-        frames: frames
+        frames: frames,
+        raw: raw_frames1 + raw_frames2
       }
 
       self.class.new(data)
