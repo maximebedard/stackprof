@@ -9,7 +9,7 @@ module StackProf
     attr_reader :data
 
     def frames(sort_by_total=false)
-      Hash[ *@data[:frames].sort_by{ |iseq, stats| -stats[sort_by_total ? :total_samples : :samples] }.flatten(1) ]
+      @data[:frames].sort_by{ |iseq, stats| -stats[sort_by_total ? :total_samples : :samples] }.inject({}){|h, (k, v)| h[k] = v; h}
     end
 
     # normalized frames is used when we want to combine multiple
@@ -81,12 +81,12 @@ module StackProf
       pp @data
     end
 
-    def print_dump
-      puts Marshal.dump(@data.reject{|k,v| k == :files })
+    def print_dump(f=STDOUT)
+      f.puts Marshal.dump(@data.reject{|k,v| k == :files })
     end
 
     def print_stackcollapse
-      raise "profile does not include raw samples" unless raw = data[:raw]
+      raise "profile does not include raw samples (add `raw: true` to collecting StackProf.run)" unless raw = data[:raw]
 
       while len = raw.shift
         frames = raw.slice!(0, len)
@@ -98,7 +98,7 @@ module StackProf
     end
 
     def print_flamegraph(f=STDOUT, skip_common=true)
-      raise "profile does not include raw samples" unless raw = data[:raw]
+      raise "profile does not include raw samples (add `raw: true` to collecting StackProf.run)" unless raw = data[:raw]
 
       stacks = []
       max_x = 0
@@ -165,29 +165,43 @@ module StackProf
       f.puts %{{"x":#{x},"y":#{y},"width":#{weight},"frame_id":#{addr},"frame":#{frame[:name].dump},"file":#{frame[:file].dump}}}
     end
 
-    def print_graphviz(filter = nil, f = STDOUT)
-      if filter
+    def print_graphviz(options = {}, f = STDOUT)
+      if filter = options[:filter]
         mark_stack = []
-        list = frames
+        list = frames(true)
         list.each{ |addr, frame| mark_stack << addr if frame[:name] =~ filter }
         while addr = mark_stack.pop
           frame = list[addr]
           unless frame[:marked]
-            $stderr.puts frame[:edges].inspect
-            mark_stack += frame[:edges].map{ |addr, weight| addr.to_s if list[addr.to_s][:total_samples] <= weight*1.2 }.compact if frame[:edges]
+            mark_stack += frame[:edges].map{ |addr, weight| addr if list[addr][:total_samples] <= weight*1.2 }.compact if frame[:edges]
             frame[:marked] = true
           end
         end
         list = list.select{ |addr, frame| frame[:marked] }
-        list.each{ |addr, frame| frame[:edges] && frame[:edges].delete_if{ |k,v| list[k.to_s].nil? } }
+        list.each{ |addr, frame| frame[:edges] && frame[:edges].delete_if{ |k,v| list[k].nil? } }
         list
       else
-        list = frames
+        list = frames(true)
       end
 
+
+      limit = options[:limit]
+      fraction = options[:node_fraction]
+
+      included_nodes = {}
+      node_minimum = fraction ? (fraction * overall_samples).ceil : 0
+
       f.puts "digraph profile {"
-      list.each do |frame, info|
+      f.puts "Legend [shape=box,fontsize=24,shape=plaintext,label=\""
+      f.print "Total samples: #{overall_samples}\\l"
+      f.print "Showing top #{limit} nodes\\l" if limit
+      f.print "Dropped nodes with < #{node_minimum} samples\\l" if fraction
+      f.puts "\"];"
+
+      list.each_with_index do |(frame, info), index|
         call, total = info.values_at(:samples, :total_samples)
+        break if total < node_minimum || (limit && index >= limit)
+
         sample = ''
         sample << "#{call} (%2.1f%%)\\rof " % (call*100.0/overall_samples) if call < total
         sample << "#{total} (%2.1f%%)\\r" % (total*100.0/overall_samples)
@@ -195,8 +209,16 @@ module StackProf
         size = (1.0 * total / overall_samples) * 2.0 + 0.5
 
         f.puts "  \"#{frame}\" [size=#{size}] [fontsize=#{fontsize}] [penwidth=\"#{size}\"] [shape=box] [label=\"#{info[:name]}\\n#{sample}\"];"
+        included_nodes[frame] = true
+      end
+
+      list.each do |frame, info|
+        next unless included_nodes[frame]
+
         if edges = info[:edges]
           edges.each do |edge, weight|
+            next unless included_nodes[edge]
+
             size = (1.0 * weight / overall_samples) * 2.0 + 0.5
             f.puts "  \"#{frame}\" -> \"#{edge}\" [label=\"#{weight}\"] [weight=\"#{weight}\"] [penwidth=\"#{size}\"];"
           end
@@ -252,7 +274,7 @@ module StackProf
     end
 
     def print_method(name, f = STDOUT)
-      name = /#{Regexp.escape name}/ unless Regexp === name
+      name = /#{name}/ unless Regexp === name
       frames.each do |frame, info|
         next unless info[:name] =~ name
         file, line = info.values_at(:file, :line)
@@ -296,8 +318,7 @@ module StackProf
 
     def print_file(filter, f = STDOUT)
       filter = /#{Regexp.escape filter}/ unless Regexp === filter
-      list = files
-      list.select!{ |name, lines| name =~ filter }
+      list = files.select{ |name, lines| name =~ filter }
       list.sort_by{ |file, vals| -vals.values.inject(0){ |sum, n| sum + (n.is_a?(Array) ? n[1] : n) } }.each do |file, lines|
         source_display(f, file, lines)
       end
