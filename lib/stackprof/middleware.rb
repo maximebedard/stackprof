@@ -9,6 +9,7 @@ module StackProf
 
       Middleware.mode     = options[:mode] || :cpu
       Middleware.interval = options[:interval] || 1000
+      Middleware.raw      = options[:raw] || false
       Middleware.enabled  = options[:enabled]
       Middleware.path     = options[:path] || 'tmp'
       Middleware.raw      = options[:raw] || false
@@ -16,8 +17,8 @@ module StackProf
     end
 
     def call(env)
-      enabled, mode = Middleware.enabled?
-      StackProf.start(mode: mode || Middleware.mode, raw: Middleware.raw, interval: Middleware.interval) if enabled
+      enabled = Middleware.enabled?(env)
+      StackProf.start(mode: Middleware.mode, interval: Middleware.interval, raw: Middleware.raw) if enabled
       @app.call(env)
     ensure
       if enabled
@@ -30,7 +31,7 @@ module StackProf
     end
 
     class << self
-      attr_accessor :enabled, :mode, :interval, :path, :raw
+      attr_accessor :enabled, :mode, :interval, :raw, :path
 
       def enabled?
         if enabled.respond_to?(:call)

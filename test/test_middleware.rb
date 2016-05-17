@@ -1,10 +1,10 @@
 $:.unshift File.expand_path('../../lib', __FILE__)
 require 'stackprof'
 require 'stackprof/middleware'
-require 'test/unit'
+require 'minitest/autorun'
 require 'mocha/setup'
 
-class StackProf::MiddlewareTest < Test::Unit::TestCase
+class StackProf::MiddlewareTest < MiniTest::Test
 
   def test_path_default
     StackProf::Middleware.new(Object.new)
@@ -70,7 +70,13 @@ class StackProf::MiddlewareTest < Test::Unit::TestCase
 
     middleware.call(nil)
 
-    assert proc_called
+    env = Hash.new { true }
+    StackProf::Middleware.new(Object.new, enabled: enable_proc)
+    assert StackProf::Middleware.enabled?(env)
   end
 
+  def test_raw
+    StackProf::Middleware.new(Object.new, raw: true)
+    assert StackProf::Middleware.raw
+  end
 end
