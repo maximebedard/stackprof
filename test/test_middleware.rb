@@ -39,36 +39,21 @@ class StackProf::MiddlewareTest < MiniTest::Test
   end
 
   def test_enabled_should_use_a_proc_if_passed
+    env = {}
+
     StackProf::Middleware.new(Object.new, enabled: Proc.new{ false })
-    refute StackProf::Middleware.enabled?
+    refute StackProf::Middleware.enabled?(env)
 
     StackProf::Middleware.new(Object.new, enabled: Proc.new{ true })
-    assert StackProf::Middleware.enabled?
+    assert StackProf::Middleware.enabled?(env)
   end
 
-  def test_enabled_should_override_mode_if_a_proc
-    proc_called = false
-    middleware = StackProf::Middleware.new(proc {|env| proc_called = true}, enabled: Proc.new{ [true, 'foo'] })
-    enabled, mode = StackProf::Middleware.enabled?
-    assert enabled
-    assert_equal 'foo', mode
+  def test_enabled_should_use_a_proc_if_passed_and_use_the_request_env
+    enable_proc = Proc.new {|env| env['PROFILE'] }
 
-    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: false})
-    StackProf.expects(:stop)
-
-    middleware.call(nil)
-    assert proc_called
-  end
-
-  def test_raw_should_start_with_raw
-    proc_called = false
-
-    middleware = StackProf::Middleware.new(proc { |env| proc_called = true }, enabled: [true, 'foo'], raw: true)
-
-    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: true})
-    StackProf.expects(:stop)
-
-    middleware.call(nil)
+    env = Hash.new { false }
+    StackProf::Middleware.new(Object.new, enabled: enable_proc)
+    refute StackProf::Middleware.enabled?(env)
 
     env = Hash.new { true }
     StackProf::Middleware.new(Object.new, enabled: enable_proc)
@@ -78,5 +63,20 @@ class StackProf::MiddlewareTest < MiniTest::Test
   def test_raw
     StackProf::Middleware.new(Object.new, raw: true)
     assert StackProf::Middleware.raw
+  end
+
+  def test_enabled_should_override_mode_if_a_proc
+    proc_called = false
+    middleware = StackProf::Middleware.new(proc {|env| proc_called = true}, enabled: Proc.new{ [true, 'foo'] })
+    env = Hash.new { true }
+    enabled, mode = StackProf::Middleware.enabled?(env)
+    assert enabled
+    assert_equal 'foo', mode
+
+    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: false})
+    StackProf.expects(:stop)
+
+    middleware.call(env)
+    assert proc_called
   end
 end
