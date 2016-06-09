@@ -49,6 +49,24 @@ class StackProf::MiddlewareTest < MiniTest::Test
     assert proc_called
   end
 
+  def test_save_proc_should_receive_env_in_proc_if_passed
+    StackProf.stubs(:results).returns({ mode: 'foo' })
+
+    env_set = nil
+    StackProf::Middleware.new(Object.new, saviour: Proc.new{ |env, results| env_set = env['FOO'] })
+    StackProf::Middleware.save({ 'FOO' => 'bar' })
+    assert_equal env_set, 'bar'
+  end
+
+  def test_save_proc_should_receive_results_in_proc_if_passed
+    StackProf.stubs(:results).returns({ mode: 'foo' })
+
+    results_received = nil
+    StackProf::Middleware.new(Object.new, saviour: Proc.new{ |env, results| results_received = results[:mode] })
+    StackProf::Middleware.save({})
+    assert_equal results_received, 'foo'
+  end
+
   def test_enabled_should_use_a_proc_if_passed
     env = {}
 
