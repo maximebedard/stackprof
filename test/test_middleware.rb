@@ -38,6 +38,17 @@ class StackProf::MiddlewareTest < MiniTest::Test
     StackProf::Middleware.save
   end
 
+  def test_save_should_use_a_proc_if_passed
+    StackProf.stubs(:results).returns({ mode: 'foo' })
+    FileUtils.expects(:mkdir_p).with('/foo').never
+    File.expects(:open).with(regexp_matches(/^\/foo\/stackprof-foo/), 'wb').never
+
+    proc_called = false
+    StackProf::Middleware.new(Object.new, saviour: Proc.new{ proc_called = true })
+    StackProf::Middleware.save
+    assert proc_called
+  end
+
   def test_enabled_should_use_a_proc_if_passed
     env = {}
 
