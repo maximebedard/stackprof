@@ -108,4 +108,21 @@ class StackProf::MiddlewareTest < MiniTest::Test
     middleware.call(env)
     assert proc_called
   end
+
+  def test_saviour_should_be_called_when_enabled_with_env
+    proc_called = false
+    env_set = nil
+    results_received = nil
+    enable_proc = Proc.new{ [true, 'foo'] }
+    saviour_proc = Proc.new{ |env, results| env_set = env['FOO'] ; results_received = results[:mode] }
+    middleware = StackProf::Middleware.new(proc {|env| proc_called = true}, enabled: enable_proc, saviour: saviour_proc, save_every: 1)
+    StackProf.expects(:start).with({mode: 'foo', interval: StackProf::Middleware.interval, raw: false})
+    StackProf.expects(:stop)
+    StackProf.stubs(:results).returns({ mode: 'foo' })
+
+    middleware.call({ 'FOO' => 'bar' })
+    assert proc_called
+    assert_equal env_set, 'bar'
+    assert_equal results_received, 'foo'
+  end
 end
