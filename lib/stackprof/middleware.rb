@@ -5,13 +5,15 @@ module StackProf
     def initialize(app, options = {})
       @app       = app
       @options   = options
-      @num_reqs  = options[:save_every] || nil
 
-      Middleware.mode     = options[:mode] || :cpu
-      Middleware.interval = options[:interval] || 1000
-      Middleware.raw      = options[:raw] || false
-      Middleware.enabled  = options[:enabled]
-      Middleware.path     = options[:path] || 'tmp'
+      Middleware.save_every = options[:save_every] || nil
+      Middleware.mode       = options[:mode] || :cpu
+      Middleware.interval   = options[:interval] || 1000
+      Middleware.raw        = options[:raw] || false
+      Middleware.enabled    = options[:enabled]
+      Middleware.path       = options[:path] || 'tmp'
+
+      @num_reqs = Middleware.save_every
       at_exit{ Middleware.save } if options[:save_at_exit]
     end
 
@@ -23,21 +25,25 @@ module StackProf
       if enabled
         StackProf.stop
         if @num_reqs && (@num_reqs-=1) == 0
-          @num_reqs = @options[:save_every]
+          @num_reqs = Middleware.save_every
           Middleware.save
         end
       end
     end
 
     class << self
-      attr_accessor :enabled, :mode, :interval, :raw, :path
+      attr_accessor :enabled, :mode, :interval, :raw, :path, :save_every
 
       def enabled?(env)
-        if enabled.respond_to?(:call)
-          enabled.call(env)
-        else
-          enabled
-        end
+        expand_value(enabled, env)
+      end
+
+      def interval
+        expand_value(@interval)
+      end
+
+      def save_every
+        expand_value(@save_every)
       end
 
       def save(filename = nil)
@@ -51,6 +57,11 @@ module StackProf
         end
       end
 
+      private
+
+      def expand_value(value, env = nil)
+        value.respond_to?(:call) ? value.call(env) : value
+      end
     end
   end
 end
